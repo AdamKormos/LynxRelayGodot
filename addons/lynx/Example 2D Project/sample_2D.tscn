@@ -1,11 +1,11 @@
-[gd_scene load_steps=10 format=3 uid="uid://dpls8q8dxt0br"]
+[gd_scene format=3 uid="uid://dpls8q8dxt0br"]
 
-[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/hud_2D.gd" id="1_2sn1h"]
-[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/player_2D.gd" id="1_12qdw"]
+[ext_resource type="Script" uid="uid://eql1rckujmld" path="res://addons/lynx/Example 2D Project/hud_2D.gd" id="1_2sn1h"]
+[ext_resource type="Script" uid="uid://bw851lbsniv7y" path="res://addons/lynx/Example 2D Project/player_2D.gd" id="1_12qdw"]
 [ext_resource type="Texture2D" uid="uid://60mal4g86xc4" path="res://addons/lynx/lynxrelay-logo.png" id="2_pi4dw"]
-[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/player_detector_area_2D.gd" id="3_8cgf7"]
-[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/coin_get_area2D.gd" id="5_exado"]
-[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/lynx_handler_coin2D.gd" id="6_exado"]
+[ext_resource type="Script" uid="uid://bm3gsldj6ejjk" path="res://addons/lynx/Example 2D Project/player_detector_area_2D.gd" id="3_8cgf7"]
+[ext_resource type="Script" uid="uid://cw54rouykuox3" path="res://addons/lynx/Example 2D Project/coin_get_area2D.gd" id="5_exado"]
+[ext_resource type="Script" uid="uid://bgkdupl3eklo8" path="res://addons/lynx/Example 2D Project/lynx_handler_coin2D.gd" id="6_exado"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_8cgf7"]
 size = Vector2(50, 50)
@@ -14,9 +14,9 @@ size = Vector2(50, 50)
 
 [sub_resource type="CanvasTexture" id="CanvasTexture_2sn1h"]
 
-[node name="Sample2d" type="Node2D"]
+[node name="Sample2d" type="Node2D" unique_id=908874787]
 
-[node name="Counter" type="Label" parent="."]
+[node name="Counter" type="Label" parent="." unique_id=1372583365]
 offset_right = 327.0
 offset_bottom = 53.0
 theme_override_font_sizes/font_size = 48
@@ -24,7 +24,7 @@ text = "0/0"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="CounterDescription" type="Label" parent="."]
+[node name="CounterDescription" type="Label" parent="." unique_id=1498663760]
 offset_left = 14.0
 offset_top = 60.0
 offset_right = 341.0
@@ -37,7 +37,7 @@ event completion.
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="CounterDescription2" type="Label" parent="."]
+[node name="CounterDescription2" type="Label" parent="." unique_id=775719958]
 offset_top = 299.0
 offset_right = 327.0
 offset_bottom = 484.0
@@ -50,11 +50,11 @@ is available)"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="HUD" type="CanvasLayer" parent="." node_paths=PackedStringArray("player")]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=116764028 node_paths=PackedStringArray("player")]
 script = ExtResource("1_2sn1h")
 player = NodePath("../Player")
 
-[node name="CoinCount" type="Label" parent="HUD"]
+[node name="CoinCount" type="Label" parent="HUD" unique_id=904260854]
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
@@ -67,51 +67,52 @@ text = "000"
 horizontal_alignment = 2
 vertical_alignment = 1
 
-[node name="Player" type="CharacterBody2D" parent="."]
+[node name="Player" type="CharacterBody2D" parent="." unique_id=515830073]
 position = Vector2(406, 356)
 script = ExtResource("1_12qdw")
 speed = 300.0
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="Player"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Player" unique_id=1576068180]
 shape = SubResource("RectangleShape2D_8cgf7")
 
-[node name="Sprite2D" type="Sprite2D" parent="Player"]
+[node name="Sprite2D" type="Sprite2D" parent="Player" unique_id=889221567]
 scale = Vector2(0.12, 0.12)
 texture = ExtResource("2_pi4dw")
 
-[node name="PlayerDetectorArea" type="Area2D" parent="."]
+[node name="PlayerDetectorArea" type="Area2D" parent="." unique_id=242066857]
 position = Vector2(407, 217)
 script = ExtResource("3_8cgf7")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="PlayerDetectorArea"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlayerDetectorArea" unique_id=68574448]
 shape = SubResource("RectangleShape2D_r1e27")
 
-[node name="Sprite2D" type="Sprite2D" parent="PlayerDetectorArea"]
+[node name="Sprite2D" type="Sprite2D" parent="PlayerDetectorArea" unique_id=178370779]
 modulate = Color(0.447059, 0.494118, 1, 1)
 z_index = -1
 scale = Vector2(20, 20)
 texture = SubResource("CanvasTexture_2sn1h")
 
-[node name="CoinGetArea" type="Area2D" parent="."]
+[node name="CoinGetArea" type="Area2D" parent="." unique_id=784953988]
 position = Vector2(152, 255)
 script = ExtResource("5_exado")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="CoinGetArea"]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="CoinGetArea" unique_id=1577413373]
 shape = SubResource("RectangleShape2D_r1e27")
 
-[node name="Sprite2D" type="Sprite2D" parent="CoinGetArea"]
+[node name="Sprite2D" type="Sprite2D" parent="CoinGetArea" unique_id=2145545715]
 modulate = Color(1, 1, 0, 1)
 z_index = -1
 scale = Vector2(20, 20)
 texture = SubResource("CanvasTexture_2sn1h")
 
-[node name="LynxHandler" type="Node" parent="." node_paths=PackedStringArray("counter_label", "coin_get_area", "player")]
+[node name="LynxHandler" type="Node" parent="." unique_id=1725713958 node_paths=PackedStringArray("counter_label", "coin_get_area", "player")]
 script = ExtResource("6_exado")
 counter_label = NodePath("../Counter")
 coin_get_area = NodePath("../CoinGetArea")
 player = NodePath("../Player")
 
-[node name="GetterTimer" type="Timer" parent="LynxHandler"]
+[node name="GetterTimer" type="Timer" parent="LynxHandler" unique_id=1238512108]
+wait_time = 5.0
 autostart = true
 
 [connection signal="body_entered" from="PlayerDetectorArea" to="PlayerDetectorArea" method="_on_body_entered"]

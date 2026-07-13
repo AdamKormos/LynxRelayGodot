@@ -58,7 +58,15 @@ const INSTALLATION_SAVE_PATH := "user://lynx_relay_installation.json"
 
 ## Minimum time between real sync HTTP requests for the same relay.
 ## Calls inside this window return the last cached sync result instead.
-const SYNC_CACHE_MS := 1000
+const SYNC_CACHE_MS := 5000
+
+## Increment requests are queued so accidental per-frame calls are serialized safely.
+## This short delay lets same-frame triggers enter the FIFO queue before the worker starts.
+## Queue items are sent one-by-one; amounts are never merged.
+const INCREMENT_BATCH_FLUSH_DELAY_SECONDS := 0.25
+
+## Fallback retry delay used when a transient request failure does not include retry_after_seconds.
+const DEFAULT_INCREMENT_RETRY_DELAY_SECONDS := 5.0
 
 
 # -------------------------------------------------------------------
@@ -118,10 +126,19 @@ signal game_access_rejected(code: String, message: String)
 ## Useful for UI feedback and for distinguishing local unlocks from remote community unlocks.
 signal increment_started(relay_id: String, amount: int)
 
-## Emitted after this local installation successfully incremented a relay and force-synced state.
+## Emitted when an increment was added to the local batch queue.
+signal increment_queued(relay_id: String, amount: int, pending_amount: int)
+
+## Emitted when a queued increment batch starts sending to the backend.
+signal increment_flush_started(relay_id: String, amount: int)
+
+## Emitted when a queued increment could not be sent yet but was kept for a later retry.
+signal increment_retry_scheduled(relay_id: String, amount: int, retry_after_seconds: float, result: Dictionary)
+
+## Emitted after this local installation successfully flushed an increment batch.
 signal increment_completed(relay_id: String, amount: int, relay_state: Dictionary, result: Dictionary)
 
-## Emitted when this local installation attempted to increment a relay but the request failed.
+## Emitted when this local installation attempted to increment a relay but the request failed permanently.
 signal increment_failed(relay_id: String, amount: int, result: Dictionary)
 
 
@@ -162,9 +179,30 @@ var _sync_cache_by_relay: Dictionary = {}
 ## Tick time of each cached sync result.
 var _sync_cache_time_by_relay: Dictionary = {}
 
+## Highest relay state seen by this client per relay.
+## This prevents older in-flight sync responses from moving UI counters backwards
+## after a newer local increment response has already been confirmed.
+var _latest_relay_state_by_relay: Dictionary = {}
+
 ## True while a real HTTP sync is already running for a relay.
 ## Extra sync_relay() calls will join the result instead of starting another request.
 var _sync_in_flight_by_relay: Dictionary = {}
+
+## Pending local increment requests, keyed by relay id.
+## Each entry is sent as its own backend request; values are never merged.
+var _increment_queue_by_relay: Dictionary = {}
+
+## True when a delayed queue drain has already been scheduled for a relay.
+var _increment_flush_scheduled_by_relay: Dictionary = {}
+
+## True while the single queue worker is draining a relay's increment queue.
+var _increment_flush_in_flight_by_relay: Dictionary = {}
+
+## Last completed increment result for callers that joined an already-running flush.
+var _increment_last_flush_result_by_relay: Dictionary = {}
+
+## Earliest tick time when the next retry is allowed after a transient/rate-limit error.
+var _increment_retry_not_before_ms_by_relay: Dictionary = {}
 
 
 ## Starts setup automatically when this Autoload enters the scene tree.
@@ -424,6 +462,7 @@ func _sync_relay_uncached(relay_id: String) -> Dictionary:
 		}
 		_save_installation_file()
 		
+		relay_state = _remember_relay_state(relay_id, relay_state)
 		sync_completed.emit(relay_id, relay_state, claim)
 		_emit_reward_available(relay_id, claim, false)
 	else:
@@ -434,8 +473,9 @@ func _sync_relay_uncached(relay_id: String) -> Dictionary:
 			_update_claimed_version_from_claim(relay_id, claim)
 			_save_installation_file()
 		
+		relay_state = _remember_relay_state(relay_id, relay_state)
 		sync_completed.emit(relay_id, relay_state, claim)
-	
+
 	return result
 
 # Backward-compatible alias. Prefer sync_relay().
@@ -496,25 +536,214 @@ func get_relay(relay_id: String) -> Dictionary:
 	return result
 
 
-## Increments an event's counter.
-func increment_relay(relay_id: String, amount: int = 1) -> Dictionary:
-	var setup_ok := await setup()
-	
-	if not setup_ok:
-		var setup_fail_result := {
+## Queues an event counter increment.
+##
+## This intentionally uses a simple FIFO queue instead of amount batching.
+## Every gameplay trigger becomes one queued backend increment request. This keeps
+## backend max_increment validation meaningful and avoids batch state bugs.
+##
+## The main counter remains server-authoritative. The UI should update the confirmed
+## counter only from increment_completed/sync_completed responses.
+func increment_relay(relay_id: String, amount: int = 1, flush_immediately: bool = false) -> Dictionary:
+	if amount <= 0:
+		var invalid_amount_result := {
 			"ok": false,
 			"status": 0,
-			"code": "setup_failed",
-			"error": "Relay setup failed."
+			"code": "invalid_amount",
+			"error": "Increment amount must be positive."
 		}
-		increment_failed.emit(relay_id, amount, setup_fail_result)
-		return setup_fail_result
+		increment_failed.emit(relay_id, amount, invalid_amount_result)
+		return invalid_amount_result
 	
-	# This signal fires before the HTTP increment/sync chain.
-	# Handlers can mark the upcoming reward offer as caused by the local player,
-	# so they do not show a separate "remote reward available" popup for it.
+	# Fire immediately so UI/gameplay can show non-authoritative feedback without
+	# changing the main server counter.
 	increment_started.emit(relay_id, amount)
 	
+	var queue := _get_increment_queue(relay_id)
+	queue.append(amount)
+	_increment_queue_by_relay[relay_id] = queue
+	increment_queued.emit(relay_id, amount, _sum_increment_queue(queue))
+	
+	_start_increment_queue_worker(
+		relay_id,
+		0.0 if flush_immediately else INCREMENT_BATCH_FLUSH_DELAY_SECONDS
+	)
+	
+	return {
+		"ok": true,
+		"status": 0,
+		"queued": true,
+		"relay_id": relay_id,
+		"amount": amount,
+		"pending_amount": _sum_increment_queue(queue),
+		"pending_count": queue.size(),
+		"flush_delay_seconds": 0.0 if flush_immediately else INCREMENT_BATCH_FLUSH_DELAY_SECONDS
+	}
+
+
+## Backward-compatible manual flush entry point.
+## It starts the same single-owner queue worker used by increment_relay().
+func flush_pending_increment(relay_id: String) -> Dictionary:
+	var queue := _get_increment_queue(relay_id)
+	if queue.is_empty():
+		return {
+			"ok": true,
+			"status": 0,
+			"noop": true,
+			"relay_id": relay_id
+		}
+	
+	_start_increment_queue_worker(relay_id, 0.0)
+	return {
+		"ok": true,
+		"status": 0,
+		"queued": true,
+		"relay_id": relay_id,
+		"pending_amount": _sum_increment_queue(queue),
+		"pending_count": queue.size()
+	}
+
+
+func _start_increment_queue_worker(relay_id: String, initial_delay_seconds: float) -> void:
+	if bool(_increment_flush_in_flight_by_relay.get(relay_id, false)):
+		return
+	
+	if bool(_increment_flush_scheduled_by_relay.get(relay_id, false)):
+		return
+	
+	_increment_flush_scheduled_by_relay[relay_id] = true
+	call_deferred("_increment_queue_worker", relay_id, maxf(0.0, initial_delay_seconds))
+
+
+func _increment_queue_worker(relay_id: String, initial_delay_seconds: float) -> void:
+	if initial_delay_seconds > 0.0:
+		await get_tree().create_timer(initial_delay_seconds).timeout
+	
+	_increment_flush_scheduled_by_relay.erase(relay_id)
+	
+	if bool(_increment_flush_in_flight_by_relay.get(relay_id, false)):
+		return
+	
+	_increment_flush_in_flight_by_relay[relay_id] = true
+	
+	var setup_ok := await setup()
+	if not setup_ok:
+		var failed_queue := _get_increment_queue(relay_id)
+		_increment_queue_by_relay.erase(relay_id)
+		_increment_flush_in_flight_by_relay.erase(relay_id)
+		var failed_amount := _sum_increment_queue(failed_queue)
+		if failed_amount > 0:
+			var setup_fail_result := {
+				"ok": false,
+				"status": 0,
+				"code": "setup_failed",
+				"error": "Relay setup failed before increment flush."
+			}
+			increment_failed.emit(relay_id, failed_amount, setup_fail_result)
+		return
+	
+	while not _get_increment_queue(relay_id).is_empty():
+		var now_ms := Time.get_ticks_msec()
+		var retry_not_before_ms := int(_increment_retry_not_before_ms_by_relay.get(relay_id, 0))
+		if retry_not_before_ms > now_ms:
+			var wait_seconds := float(retry_not_before_ms - now_ms) / 1000.0
+			var retry_result := {
+				"ok": true,
+				"status": 0,
+				"queued_for_retry": true,
+				"relay_id": relay_id,
+				"pending_amount": _sum_increment_queue(_get_increment_queue(relay_id)),
+				"pending_count": _get_increment_queue(relay_id).size(),
+				"retry_after_seconds": wait_seconds
+			}
+			increment_retry_scheduled.emit(
+				relay_id,
+				_sum_increment_queue(_get_increment_queue(relay_id)),
+				wait_seconds,
+				retry_result
+			)
+			await get_tree().create_timer(wait_seconds).timeout
+			continue
+		
+		var queue := _get_increment_queue(relay_id)
+		if queue.is_empty():
+			break
+		
+		var amount := int(queue.pop_front())
+		_increment_queue_by_relay[relay_id] = queue
+		
+		increment_flush_started.emit(relay_id, amount)
+		var result := await _send_increment_request(relay_id, amount)
+		_increment_last_flush_result_by_relay[relay_id] = result.duplicate(true)
+		
+		if not result.get("ok", false):
+			if _is_retryable_increment_result(result):
+				# Put the same item back to the front. This is not batching: it is
+				# the exact request that failed retryably.
+				queue = _get_increment_queue(relay_id)
+				queue.push_front(amount)
+				_increment_queue_by_relay[relay_id] = queue
+				var retry_after_seconds := _get_increment_retry_after_seconds(result)
+				_increment_retry_not_before_ms_by_relay[relay_id] = Time.get_ticks_msec() + int(retry_after_seconds * 1000.0)
+				result["queued_for_retry"] = true
+				result["retry_after_seconds"] = retry_after_seconds
+				request_failed.emit("increment", relay_id, result)
+				increment_retry_scheduled.emit(
+					relay_id,
+					_sum_increment_queue(queue),
+					retry_after_seconds,
+					result
+				)
+				continue
+			
+			# Permanent failure: drop only this one queued item. Later queued
+			# increments still get a chance instead of locking the queue forever.
+			request_failed.emit("increment", relay_id, result)
+			increment_failed.emit(relay_id, amount, result)
+			continue
+		
+		_increment_retry_not_before_ms_by_relay.erase(relay_id)
+		invalidate_sync_cache(relay_id)
+		var relay_state := _extract_relay_state_from_increment_result(result)
+		
+		if not relay_state.is_empty():
+			_store_sync_cache(relay_id, {
+				"ok": true,
+				"status": int(result.get("status", 200)),
+				"data": relay_state
+			})
+			relay_state = _remember_relay_state(relay_id, relay_state)
+			increment_completed.emit(relay_id, amount, relay_state, result)
+			_maybe_sync_for_new_reward(relay_id, relay_state)
+		else:
+			increment_completed.emit(relay_id, amount, {}, result)
+		
+		# Yield one frame between queued requests so UI/signals can process and
+		# rapid gameplay does not freeze the frame.
+		await get_tree().process_frame
+	
+	_increment_flush_in_flight_by_relay.erase(relay_id)
+	
+	# If an increment arrived exactly while clearing the worker flag, start again.
+	if not _get_increment_queue(relay_id).is_empty():
+		_start_increment_queue_worker(relay_id, INCREMENT_BATCH_FLUSH_DELAY_SECONDS)
+
+
+func _get_increment_queue(relay_id: String) -> Array:
+	var existing: Variant = _increment_queue_by_relay.get(relay_id, [])
+	if existing is Array:
+		return existing.duplicate()
+	return []
+
+
+func _sum_increment_queue(queue: Array) -> int:
+	var total := 0
+	for item in queue:
+		total += int(item)
+	return total
+
+
+func _send_increment_request(relay_id: String, amount: int) -> Dictionary:
 	var headers := _game_headers()
 	headers.append("Content-Type: application/json")
 	headers.append("Idempotency-Key: " + _generate_request_id())
@@ -524,27 +753,50 @@ func increment_relay(relay_id: String, amount: int = 1) -> Dictionary:
 		"client_id": installation_id
 	}
 	
-	# Increments are idempotent through the generated Idempotency-Key.
-	var result := await _send_json_request(
+	return await _send_json_request(
 		_url("/v1/relays/" + relay_id.uri_encode() + "/increment"),
 		HTTPClient.METHOD_POST,
 		headers,
 		payload
 	)
+
+
+func _is_retryable_increment_result(result: Dictionary) -> bool:
+	var status := int(result.get("status", 0))
+	return status == 0 or status == 429 or status >= 500
+
+
+func _get_increment_retry_after_seconds(result: Dictionary) -> float:
+	var retry_after := float(result.get("retry_after_seconds", 0.0))
+	if retry_after <= 0.0:
+		retry_after = float(result.get("retry_after", 0.0))
 	
-	if not result.get("ok", false):
-		request_failed.emit("increment", relay_id, result)
-		increment_failed.emit(relay_id, amount, result)
-		return result
+	var body: Variant = result.get("data", {})
+	if retry_after <= 0.0 and body is Dictionary:
+		retry_after = float(body.get("retry_after_seconds", body.get("retry_after", 0.0)))
 	
-	# Refresh UI after increment.
-	# Increments change server state, so bypass and invalidate the 1-second sync cache.
-	invalidate_sync_cache(relay_id)
-	var sync_result: Dictionary = await sync_relay(relay_id, true)
-	var relay_state := _extract_relay_state_from_sync_result(sync_result)
-	increment_completed.emit(relay_id, amount, relay_state, result)
+	if retry_after <= 0.0:
+		retry_after = DEFAULT_INCREMENT_RETRY_DELAY_SECONDS
+	return maxf(1.0, retry_after)
+
+
+func _maybe_sync_for_new_reward(relay_id: String, relay_state: Dictionary) -> void:
+	# Increment responses update the visible counter immediately. A token-changing
+	# sync is only needed right away when a new completion version may have become
+	# claimable; otherwise the 5-second passive sync will refresh normal state.
+	var completion_version := int(relay_state.get("completion_version", 0))
+	if completion_version <= get_client_claimed_version(relay_id):
+		return
 	
-	return result
+	if pending_claims.has(relay_id):
+		return
+	
+	call_deferred("_deferred_reward_sync", relay_id)
+
+
+func _deferred_reward_sync(relay_id: String) -> void:
+	await get_tree().process_frame
+	await sync_relay(relay_id, true)
 
 
 ## Returns true if this relay has a server-approved reward waiting for ack_claim().
@@ -617,9 +869,34 @@ func _extract_relay_state_from_sync_result(sync_result: Dictionary) -> Dictionar
 	return data_dict.duplicate(true)
 
 
+func _extract_relay_state_from_increment_result(increment_result: Dictionary) -> Dictionary:
+	if not increment_result.get("ok", false):
+		return {}
+	
+	var data: Variant = increment_result.get("data", {})
+	if not (data is Dictionary):
+		return {}
+	
+	var data_dict: Dictionary = data
+	
+	# POST /increment currently returns { state = relay_state, ... }.
+	if data_dict.has("state") and data_dict["state"] is Dictionary:
+		return data_dict["state"].duplicate(true)
+	
+	# Keep these fallbacks so older/staging backends or manually mocked responses
+	# still update the UI instead of silently dropping the confirmed increment.
+	if data_dict.has("relay") and data_dict["relay"] is Dictionary:
+		return data_dict["relay"].duplicate(true)
+	
+	if data_dict.has("value") or data_dict.has("target") or data_dict.has("completion_version"):
+		return data_dict.duplicate(true)
+	
+	return {}
+
+
 ## Returns the currently displayed cumulative target from a relay_state.
 ## With dynamic growth, this is not always the original base target.
-## Example: base_target=100, target_multiplier=1.2 and completion_version=1 -> the current cumulative target may be 220.
+## Example: target_multiplier=1.2 and completion_version=1 -> the current cumulative target may be 220.
 func get_goal_target_from_state(relay_state: Dictionary) -> int:
 	return int(relay_state.get("target", 0))
 
@@ -651,11 +928,65 @@ func clear_local_installation_for_testing_only() -> void:
 	claimed_versions.clear()
 	invalidate_sync_cache()
 	_sync_in_flight_by_relay.clear()
+	_increment_queue_by_relay.clear()
+	_increment_flush_scheduled_by_relay.clear()
+	_increment_flush_in_flight_by_relay.clear()
+	_increment_last_flush_result_by_relay.clear()
+	_increment_retry_not_before_ms_by_relay.clear()
 	is_setup = false
 	
 	if FileAccess.file_exists(INSTALLATION_SAVE_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(INSTALLATION_SAVE_PATH))
 
+
+
+func _remember_relay_state(relay_id: String, relay_state: Dictionary) -> Dictionary:
+	if relay_state.is_empty():
+		return {}
+	
+	var incoming := relay_state.duplicate(true)
+	
+	if _latest_relay_state_by_relay.has(relay_id):
+		var known: Dictionary = _latest_relay_state_by_relay[relay_id]
+		var incoming_value := int(incoming.get("value", 0))
+		var known_value := int(known.get("value", 0))
+		var incoming_completion := int(incoming.get("completion_version", 0))
+		var known_completion := int(known.get("completion_version", 0))
+		
+		# Relay counters are monotonic during normal gameplay. If an older in-flight
+		# sync returns after a newer increment response, keep the newer state.
+		if incoming_value < known_value or incoming_completion < known_completion:
+			return known.duplicate(true)
+	
+	_latest_relay_state_by_relay[relay_id] = incoming.duplicate(true)
+	return incoming
+
+
+func _remember_relay_state_in_result(relay_id: String, result: Dictionary) -> Dictionary:
+	if not result.get("ok", false):
+		return result
+	
+	var data: Variant = result.get("data", {})
+	if not (data is Dictionary):
+		return result
+	
+	var normalized := result.duplicate(true)
+	var normalized_data: Dictionary = normalized.get("data", {})
+	
+	if normalized_data.has("relay") and normalized_data["relay"] is Dictionary:
+		normalized_data["relay"] = _remember_relay_state(relay_id, normalized_data["relay"])
+		normalized["data"] = normalized_data
+		return normalized
+	
+	if normalized_data.has("state") and normalized_data["state"] is Dictionary:
+		normalized_data["state"] = _remember_relay_state(relay_id, normalized_data["state"])
+		normalized["data"] = normalized_data
+		return normalized
+	
+	if normalized_data.has("value") or normalized_data.has("target") or normalized_data.has("completion_version"):
+		normalized["data"] = _remember_relay_state(relay_id, normalized_data)
+	
+	return normalized
 
 
 ## Clears cached sync responses. Call this after operations that change relay state,
@@ -691,7 +1022,8 @@ func _store_sync_cache(relay_id: String, result: Dictionary) -> void:
 	if not result.get("ok", false):
 		return
 	
-	_sync_cache_by_relay[relay_id] = result.duplicate(true)
+	var normalized := _remember_relay_state_in_result(relay_id, result)
+	_sync_cache_by_relay[relay_id] = normalized.duplicate(true)
 	_sync_cache_time_by_relay[relay_id] = Time.get_ticks_msec()
 
 
@@ -723,6 +1055,7 @@ func _emit_sync_completed_from_cached_result(relay_id: String, cached_result: Di
 	
 	# Do not re-emit reward_available from cache. The reward manager already saw
 	# the real HTTP result; cache hits should only refresh the UI counter path.
+	relay_state = _remember_relay_state(relay_id, relay_state)
 	sync_completed.emit(relay_id, relay_state, claim)
 
 # -------------------------------------------------------------------
@@ -776,6 +1109,7 @@ func _sync_relay_read_latest_with_pending_reward(relay_id: String) -> Dictionary
 		"blocked_token_write": true
 	}
 	
+	relay_state = _remember_relay_state(relay_id, relay_state)
 	sync_completed.emit(relay_id, relay_state, pending_claim)
 	_emit_reward_available(relay_id, pending_claim, true)
 	
@@ -816,6 +1150,7 @@ func _sync_relay_read_only_blocked_by_other_pending(relay_id: String) -> Diction
 		"blocking_relay_ids": blocking_ids
 	}
 	
+	relay_state = _remember_relay_state(relay_id, relay_state)
 	sync_completed.emit(relay_id, relay_state, claim)
 	
 	return {

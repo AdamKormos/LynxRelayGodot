@@ -16,6 +16,9 @@ class_name LynxTestInterface extends CanvasLayer
 ## Test relay id used by this UI.
 const RELAY_ID := "devtest"
 
+## Passive server refresh interval used by this test UI.
+const AUTO_SYNC_INTERVAL_SECONDS := 5.0
+
 
 ## True after the first successful relay sync.
 ## Used only to avoid repeatedly changing the initial setup button text.
@@ -24,6 +27,12 @@ var sync_done_once := false
 ## Prevents overlapping async button actions.
 ## This keeps test UI behavior predictable during sync/increment/claim calls.
 var busy := false
+
+## Latest confirmed server relay state. The main counter label only shows this
+## authoritative server value, never local optimistic increments.
+var _latest_relay_state: Dictionary = {}
+
+var _auto_sync_in_progress := false
 
 
 ## Initializes UI state, connects signals and starts setup diagnostics.
@@ -73,6 +82,21 @@ func _connect_signals() -> void:
 	if not LynxRelay.game_access_rejected.is_connected(_on_game_access_rejected):
 		LynxRelay.game_access_rejected.connect(_on_game_access_rejected)
 	
+	if not LynxRelay.increment_started.is_connected(_on_increment_started):
+		LynxRelay.increment_started.connect(_on_increment_started)
+	
+	if not LynxRelay.increment_queued.is_connected(_on_increment_queued):
+		LynxRelay.increment_queued.connect(_on_increment_queued)
+	
+	if not LynxRelay.increment_flush_started.is_connected(_on_increment_flush_started):
+		LynxRelay.increment_flush_started.connect(_on_increment_flush_started)
+	
+	if not LynxRelay.increment_retry_scheduled.is_connected(_on_increment_retry_scheduled):
+		LynxRelay.increment_retry_scheduled.connect(_on_increment_retry_scheduled)
+	
+	if not LynxRelay.increment_completed.is_connected(_on_increment_completed):
+		LynxRelay.increment_completed.connect(_on_increment_completed)
+	
 	if not LynxRelay.increment_failed.is_connected(_on_increment_failed):
 		LynxRelay.increment_failed.connect(_on_increment_failed)
 
@@ -110,6 +134,18 @@ func _show_boot_error(message: String) -> void:
 	%Counter.text = message
 
 
+func _show_runtime_error(message: String) -> void:
+	push_warning(message)
+	%Counter.text = message
+	
+	if LynxRelay.is_setup:
+		%IncrementButton.disabled = false
+		%IncrementButton.text = "INCREMENT"
+		_refresh_reward_button()
+	else:
+		_show_boot_error(message)
+
+
 func _format_result_error(result: Dictionary) -> String:
 	var code := str(result.get("code", ""))
 	var error := str(result.get("error", result.get("message", "")))
@@ -141,15 +177,71 @@ func _on_setup_failed(message: String, code: String) -> void:
 
 
 func _on_request_failed(action: String, relay_id: String, result: Dictionary) -> void:
-	_show_boot_error("Lynx " + action + " failed for '" + relay_id + "': " + _format_result_error(result))
+	if action == "increment" and result.get("queued_for_retry", false):
+		return
+	
+	var message := "Lynx " + action + " failed for '" + relay_id + "': " + _format_result_error(result)
+	
+	if action == "register" or action == "recover" or action == "setup":
+		_show_boot_error(message)
+	else:
+		_show_runtime_error(message)
 
 
 func _on_game_access_rejected(code: String, message: String) -> void:
-	_show_boot_error("Game access rejected: " + code + " | " + message)
+	var access_message := "Game access rejected: " + code + " | " + message
+	
+	if LynxRelay.is_setup:
+		_show_runtime_error(access_message)
+	else:
+		_show_boot_error(access_message)
+
+
+func _on_increment_started(relay_id: String, amount: int) -> void:
+	# Main counter stays server-authoritative.
+	# Do not preview local increments in %Counter here.
+	pass
+
+
+func _on_increment_queued(relay_id: String, amount: int, pending_amount: int) -> void:
+	if relay_id != RELAY_ID:
+		return
+	
+	%IncrementButton.text = "QUEUED +" + str(pending_amount)
+
+
+func _on_increment_flush_started(relay_id: String, amount: int) -> void:
+	if relay_id != RELAY_ID:
+		return
+	
+	%IncrementButton.text = "SENDING +" + str(amount)
+
+
+func _on_increment_retry_scheduled(relay_id: String, amount: int, retry_after_seconds: float, result: Dictionary) -> void:
+	if relay_id != RELAY_ID:
+		return
+	
+	%IncrementButton.disabled = false
+	%IncrementButton.text = "RETRY " + str(int(ceil(retry_after_seconds))) + "s"
+
+
+func _on_increment_completed(relay_id: String, amount: int, relay_state: Dictionary, result: Dictionary) -> void:
+	if relay_id != RELAY_ID:
+		return
+	
+	if not result.get("ok", false):
+		return
+	
+	if _accept_confirmed_relay_state(relay_state):
+		_update_counter_visuals_from_confirmed_state()
+		_update_local_version()
+	
+	%IncrementButton.disabled = false
+	%IncrementButton.text = "INCREMENT"
 
 
 func _on_increment_failed(relay_id: String, amount: int, result: Dictionary) -> void:
-	_show_boot_error("Increment failed for '" + relay_id + "': " + _format_result_error(result))
+	_show_runtime_error("Increment failed for '" + relay_id + "': " + _format_result_error(result))
 
 
 ## Runs the first sync after LynxRelay setup is ready.
@@ -189,22 +281,85 @@ func on_setup_completed() -> void:
 	%IncrementButton.text = "INCREMENT"
 	
 	busy = false
+	_start_auto_sync_loop()
 	_refresh_reward_button()
 
 
 ## Updates visible relay values after LynxRelay completes a sync.
 ## The actual reward offer creation is handled by LynxRewards, not this UI.
+func _start_auto_sync_loop() -> void:
+	var timer := get_node_or_null("AutoSyncTimer") as Timer
+	
+	if timer == null:
+		timer = Timer.new()
+		timer.name = "AutoSyncTimer"
+		add_child(timer)
+	
+	timer.wait_time = AUTO_SYNC_INTERVAL_SECONDS
+	timer.one_shot = false
+	
+	if not timer.timeout.is_connected(_on_auto_sync_timer_timeout):
+		timer.timeout.connect(_on_auto_sync_timer_timeout)
+	
+	if timer.is_stopped():
+		timer.start()
+
+
+func _on_auto_sync_timer_timeout() -> void:
+	await _run_passive_sync()
+
+
+func _run_passive_sync() -> void:
+	if busy or _auto_sync_in_progress:
+		return
+	
+	_auto_sync_in_progress = true
+	await LynxRelay.sync_relay(RELAY_ID)
+	_auto_sync_in_progress = false
+
+
+func _update_counter_visuals(relay_state: Dictionary) -> void:
+	var value = int(relay_state.get("value", 0))
+	var target = LynxRelay.get_goal_target_from_state(relay_state)
+	var completion_version = int(relay_state.get("completion_version", 0))
+	
+	%Counter.text = "Count: " + str(value) + "/" + str(target)
+	%ServerVersion.text = "Completion version: " + str(completion_version)
+
+
+func _accept_confirmed_relay_state(relay_state: Dictionary) -> bool:
+	if relay_state.is_empty():
+		return false
+	
+	if not _latest_relay_state.is_empty():
+		var incoming_value := int(relay_state.get("value", 0))
+		var latest_value := int(_latest_relay_state.get("value", 0))
+		var incoming_completion := int(relay_state.get("completion_version", 0))
+		var latest_completion := int(_latest_relay_state.get("completion_version", 0))
+		
+		# Relay values are server-authoritative, but older in-flight sync responses
+		# should not replace a newer confirmed server state.
+		if incoming_value < latest_value or incoming_completion < latest_completion:
+			return false
+	
+	_latest_relay_state = relay_state.duplicate(true)
+	return true
+
+
+func _update_counter_visuals_from_confirmed_state() -> void:
+	if _latest_relay_state.is_empty():
+		return
+	
+	_update_counter_visuals(_latest_relay_state)
+
+
 func _on_sync_completed(relay_id: String, relay_state: Dictionary, claim: Dictionary) -> void:
 	if relay_id != RELAY_ID:
 		return
 	
-	var value = int(relay_state.get("value", 0))
-	var target = LynxRelay.get_goal_target_from_state(relay_state)
-	var server_version = int(relay_state.get("completion_version", 0))
-	
-	%Counter.text = "Count: " + str(value) + "/" + str(target)
-	%ServerVersion.text = "Server version: " + str(server_version)
-	_update_local_version()
+	if _accept_confirmed_relay_state(relay_state):
+		_update_counter_visuals_from_confirmed_state()
+		_update_local_version()
 	
 	if not sync_done_once:
 		sync_done_once = true
@@ -257,13 +412,19 @@ func _on_increment_button_pressed() -> void:
 	busy = true
 	
 	%IncrementButton.disabled = true
-	%IncrementButton.text = "Incrementing..."
+	%IncrementButton.text = "Queueing..."
 	%ClaimReward.disabled = true
 	
-	await LynxRelay.increment_relay(RELAY_ID, 10)
+	var result: Dictionary = await LynxRelay.increment_relay(RELAY_ID, 10, true)
 	
 	%IncrementButton.disabled = false
-	%IncrementButton.text = "INCREMENT"
+	if result.get("queued_for_retry", false):
+		%IncrementButton.text = "RETRY QUEUED"
+	elif result.get("ok", false):
+		%IncrementButton.text = "INCREMENT"
+	else:
+		%IncrementButton.text = "INCREMENT"
+		_show_runtime_error("Increment failed: " + _format_result_error(result))
 	
 	busy = false
 	_refresh_reward_button()

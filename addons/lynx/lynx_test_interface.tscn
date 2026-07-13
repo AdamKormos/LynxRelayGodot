@@ -66,7 +66,7 @@ horizontal_alignment = 1
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 32
-text = "Server version: 0"
+text = "Completion version: 0"
 horizontal_alignment = 1
 
 [node name="IncrementButton" type="Button" parent="Panel/VBoxContainer"]

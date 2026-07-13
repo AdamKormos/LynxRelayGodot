@@ -16,6 +16,14 @@ extends CanvasLayer
 @export var show_amount_in_counter_popup: bool = true
 @export var show_percentage_when_available: bool = false
 
+## If true, repeated player contribution popups do not stack up forever.
+## Older queued contribution popups are replaced by the latest one.
+@export var collapse_contribution_popups: bool = true
+
+## If true, a currently playing contribution popup is interrupted when a newer
+## contribution popup arrives, so the player sees the latest contribution state.
+@export var interrupt_active_contribution_popup_with_latest: bool = true
+
 @export var relay_page_open_available_by_tap : bool = true
 ## If your game doesn't support clicking the popup's
 ## HyperlinkText, you must create an input action that
@@ -121,6 +129,8 @@ func clear_queue_and_hide() -> void:
 
 
 func _enqueue_message(message: Dictionary, urgent: bool = false) -> void:
+	var message_type := str(message.get("type", ""))
+	
 	if urgent:
 		_remove_increment_messages_from_queue()
 		
@@ -131,6 +141,23 @@ func _enqueue_message(message: Dictionary, urgent: bool = false) -> void:
 		if _active_message_type == "increment":
 			_restart_queue_runner()
 			return
+		
+		if not _is_running_queue:
+			_start_queue_runner()
+		
+		return
+	
+	if message_type == "increment" and collapse_contribution_popups:
+		_remove_increment_messages_from_queue()
+		
+		if _active_message_type == "increment" and interrupt_active_contribution_popup_with_latest:
+			# Do not make the player watch every outdated contribution popup.
+			# Jump straight to the newest contribution state instead.
+			_message_queue.push_front(message)
+			_restart_queue_runner()
+			return
+		
+		_message_queue.append(message)
 		
 		if not _is_running_queue:
 			_start_queue_runner()

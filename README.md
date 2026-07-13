@@ -4,7 +4,7 @@
 
 [Discord Community](https://discord.gg/xXzVDY5ShU)
 
-**Lynx** is a Godot plugin for shared community events.
+**Lynx** is a Godot plugin for shared community events. **(Compatible with 4.0 and above)**
 
 Players contribute to a global online event counter from inside your game.  
 When the community reaches a goal, your game can unlock rewards for players.

@@ -3,6 +3,7 @@ class_name LynxHandlerCoin2D extends LynxHandler
 
 @export var counter_label : Label
 @export var coin_get_area : CoinGetArea2D
+@export var player : Player2D
 
 
 func _ready() -> void:
@@ -40,7 +41,7 @@ func on_player_reward_claim_start():
 ## the claim procedure successfully.
 func on_player_reward_claim_success():
 	coin_get_area.visible = false
-	Player2D.coin_count += 1
+	player.coin_count += 1
 
 
 ## Called after the player attempts claimming their reward, and Lynx failed

@@ -1,20 +1,20 @@
-[gd_scene format=3 uid="uid://iawcgm8iiiyr"]
+[gd_scene load_steps=2 format=3 uid="uid://iawcgm8iiiyr"]
 
-[ext_resource type="Script" uid="uid://djag05dgipjcj" path="res://addons/lynx/lynx_test_interface.gd" id="1_2bjc0"]
+[ext_resource type="Script" path="res://addons/lynx/lynx_test_interface.gd" id="1_2bjc0"]
 
-[node name="LynxTestInterface" type="CanvasLayer" unique_id=1659641254]
+[node name="LynxTestInterface" type="CanvasLayer"]
 script = ExtResource("1_2bjc0")
 
-[node name="Node2D" type="Node2D" parent="." unique_id=1707516086]
+[node name="Node2D" type="Node2D" parent="."]
 
-[node name="Panel" type="Panel" parent="." unique_id=2068431972]
+[node name="Panel" type="Panel" parent="."]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="Panel" unique_id=1505814720]
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel"]
 layout_mode = 1
 anchors_preset = 14
 anchor_top = 0.5
@@ -26,28 +26,28 @@ grow_horizontal = 2
 grow_vertical = 2
 alignment = 1
 
-[node name="Title" type="Label" parent="Panel/VBoxContainer" unique_id=595144228]
+[node name="Title" type="Label" parent="Panel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 32
 text = "Lynx Test Interface v1.0"
 horizontal_alignment = 1
 
-[node name="Subtitle" type="Label" parent="Panel/VBoxContainer" unique_id=144147521]
+[node name="Subtitle" type="Label" parent="Panel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "Intended for testing the devtest event, or what the value of RELAY_ID is on LynxTestInterface"
 horizontal_alignment = 1
 
-[node name="EventName" type="Label" parent="Panel/VBoxContainer" unique_id=1233446739]
+[node name="EventName" type="Label" parent="Panel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 32
 text = "Test event: devtest"
 horizontal_alignment = 1
 
-[node name="Counter" type="Label" parent="Panel/VBoxContainer" unique_id=1523533423]
+[node name="Counter" type="Label" parent="Panel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 26
@@ -55,35 +55,35 @@ text = "Count: 0/0"
 horizontal_alignment = 1
 autowrap_mode = 2
 
-[node name="LocalVersion" type="Label" parent="Panel/VBoxContainer" unique_id=452904931]
+[node name="LocalVersion" type="Label" parent="Panel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 32
 text = "Local version: 0"
 horizontal_alignment = 1
 
-[node name="ServerVersion" type="Label" parent="Panel/VBoxContainer" unique_id=1149053251]
+[node name="ServerVersion" type="Label" parent="Panel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 32
 text = "Server version: 0"
 horizontal_alignment = 1
 
-[node name="IncrementButton" type="Button" parent="Panel/VBoxContainer" unique_id=1083508096]
+[node name="IncrementButton" type="Button" parent="Panel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
 theme_override_font_sizes/font_size = 30
 text = "INCREMENT"
 
-[node name="IncrementLimits" type="Label" parent="Panel/VBoxContainer" unique_id=358613406]
+[node name="IncrementLimits" type="Label" parent="Panel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "Minimum increment: 1, max: 10"
 horizontal_alignment = 1
 
-[node name="ClaimReward" type="Button" parent="Panel/VBoxContainer" unique_id=1224035789]
+[node name="ClaimReward" type="Button" parent="Panel/VBoxContainer"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0

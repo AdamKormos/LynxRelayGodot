@@ -1,11 +1,11 @@
-[gd_scene format=3 uid="uid://dpls8q8dxt0br"]
+[gd_scene load_steps=10 format=3 uid="uid://dpls8q8dxt0br"]
 
-[ext_resource type="Script" uid="uid://eql1rckujmld" path="res://addons/lynx/Example 2D Project/hud_2D.gd" id="1_2sn1h"]
-[ext_resource type="Script" uid="uid://bw851lbsniv7y" path="res://addons/lynx/Example 2D Project/player_2D.gd" id="1_12qdw"]
+[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/hud_2D.gd" id="1_2sn1h"]
+[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/player_2D.gd" id="1_12qdw"]
 [ext_resource type="Texture2D" uid="uid://60mal4g86xc4" path="res://addons/lynx/lynxrelay-logo.png" id="2_pi4dw"]
-[ext_resource type="Script" uid="uid://bm3gsldj6ejjk" path="res://addons/lynx/Example 2D Project/player_detector_area_2D.gd" id="3_8cgf7"]
-[ext_resource type="Script" uid="uid://cw54rouykuox3" path="res://addons/lynx/Example 2D Project/coin_get_area2D.gd" id="5_exado"]
-[ext_resource type="Script" uid="uid://bgkdupl3eklo8" path="res://addons/lynx/Example 2D Project/lynx_handler_coin2D.gd" id="6_exado"]
+[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/player_detector_area_2D.gd" id="3_8cgf7"]
+[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/coin_get_area2D.gd" id="5_exado"]
+[ext_resource type="Script" path="res://addons/lynx/Example 2D Project/lynx_handler_coin2D.gd" id="6_exado"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_8cgf7"]
 size = Vector2(50, 50)
@@ -14,9 +14,9 @@ size = Vector2(50, 50)
 
 [sub_resource type="CanvasTexture" id="CanvasTexture_2sn1h"]
 
-[node name="Sample2d" type="Node2D" unique_id=1054824330]
+[node name="Sample2d" type="Node2D"]
 
-[node name="Counter" type="Label" parent="." unique_id=1219414217]
+[node name="Counter" type="Label" parent="."]
 offset_right = 327.0
 offset_bottom = 53.0
 theme_override_font_sizes/font_size = 48
@@ -24,21 +24,23 @@ text = "0/0"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="CounterDescription" type="Label" parent="." unique_id=1085909669]
+[node name="CounterDescription" type="Label" parent="."]
+offset_left = 14.0
 offset_top = 60.0
-offset_right = 327.0
-offset_bottom = 168.0
+offset_right = 341.0
+offset_bottom = 208.0
 theme_override_font_sizes/font_size = 24
 text = "Entering the blue zone
 as the player triggers
-event completion."
+event completion.
+(Movement via arrow keys)"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="CounterDescription2" type="Label" parent="." unique_id=1296651146]
-offset_top = 248.0
+[node name="CounterDescription2" type="Label" parent="."]
+offset_top = 299.0
 offset_right = 327.0
-offset_bottom = 356.0
+offset_bottom = 484.0
 theme_override_font_sizes/font_size = 24
 text = "The yellow zone
 grants the player
@@ -48,10 +50,11 @@ is available)"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="HUD" type="CanvasLayer" parent="." unique_id=1562495954]
+[node name="HUD" type="CanvasLayer" parent="." node_paths=PackedStringArray("player")]
 script = ExtResource("1_2sn1h")
+player = NodePath("../Player")
 
-[node name="CoinCount" type="Label" parent="HUD" unique_id=886243779]
+[node name="CoinCount" type="Label" parent="HUD"]
 anchors_preset = 1
 anchor_left = 1.0
 anchor_right = 1.0
@@ -64,50 +67,51 @@ text = "000"
 horizontal_alignment = 2
 vertical_alignment = 1
 
-[node name="Player" type="CharacterBody2D" parent="." unique_id=406988553]
+[node name="Player" type="CharacterBody2D" parent="."]
 position = Vector2(406, 356)
 script = ExtResource("1_12qdw")
 speed = 300.0
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="Player" unique_id=884686815]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Player"]
 shape = SubResource("RectangleShape2D_8cgf7")
 
-[node name="Sprite2D" type="Sprite2D" parent="Player" unique_id=689022021]
+[node name="Sprite2D" type="Sprite2D" parent="Player"]
 scale = Vector2(0.12, 0.12)
 texture = ExtResource("2_pi4dw")
 
-[node name="PlayerDetectorArea" type="Area2D" parent="." unique_id=1688589048]
+[node name="PlayerDetectorArea" type="Area2D" parent="."]
 position = Vector2(407, 217)
 script = ExtResource("3_8cgf7")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="PlayerDetectorArea" unique_id=492655479]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="PlayerDetectorArea"]
 shape = SubResource("RectangleShape2D_r1e27")
 
-[node name="Sprite2D" type="Sprite2D" parent="PlayerDetectorArea" unique_id=1441003583]
-modulate = Color(0.44705883, 0.49411765, 1, 1)
+[node name="Sprite2D" type="Sprite2D" parent="PlayerDetectorArea"]
+modulate = Color(0.447059, 0.494118, 1, 1)
 z_index = -1
 scale = Vector2(20, 20)
 texture = SubResource("CanvasTexture_2sn1h")
 
-[node name="CoinGetArea" type="Area2D" parent="." unique_id=805209748]
-position = Vector2(152, 217)
+[node name="CoinGetArea" type="Area2D" parent="."]
+position = Vector2(152, 255)
 script = ExtResource("5_exado")
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="CoinGetArea" unique_id=704558730]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="CoinGetArea"]
 shape = SubResource("RectangleShape2D_r1e27")
 
-[node name="Sprite2D" type="Sprite2D" parent="CoinGetArea" unique_id=1761647868]
+[node name="Sprite2D" type="Sprite2D" parent="CoinGetArea"]
 modulate = Color(1, 1, 0, 1)
 z_index = -1
 scale = Vector2(20, 20)
 texture = SubResource("CanvasTexture_2sn1h")
 
-[node name="LynxHandler" type="Node" parent="." unique_id=1015296671 node_paths=PackedStringArray("counter_label", "coin_get_area")]
+[node name="LynxHandler" type="Node" parent="." node_paths=PackedStringArray("counter_label", "coin_get_area", "player")]
 script = ExtResource("6_exado")
 counter_label = NodePath("../Counter")
 coin_get_area = NodePath("../CoinGetArea")
+player = NodePath("../Player")
 
-[node name="GetterTimer" type="Timer" parent="LynxHandler" unique_id=1950614330]
+[node name="GetterTimer" type="Timer" parent="LynxHandler"]
 autostart = true
 
 [connection signal="body_entered" from="PlayerDetectorArea" to="PlayerDetectorArea" method="_on_body_entered"]

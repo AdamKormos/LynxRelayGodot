@@ -1,5 +1,9 @@
 # Lynx
 
+[Website](https://lynxrelay.space)
+
+[Discord Community](https://discord.gg/xXzVDY5ShU)
+
 **Lynx** is a Godot plugin for shared community events.
 
 Players contribute to a global online event counter from inside your game.  

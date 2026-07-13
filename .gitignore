@@ -1,0 +1,20 @@
+
+# Godot/editor generated
+.godot/
+.import/
+export_presets.cfg
+
+# Platform/export generated
+android/
+.android/
+builds/
+exports/
+
+# Secrets/local config
+.env
+.env.*
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key

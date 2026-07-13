@@ -127,7 +127,7 @@ func _format_result_error(result: Dictionary) -> String:
 		return str(result)
 	
 	var message := ""
-	for part: String in parts:
+	for part in parts:
 		if message.is_empty():
 			message = part
 		else:
@@ -171,7 +171,7 @@ func on_setup_completed() -> void:
 		return
 	
 	var any_ok := false
-	for raw_result: Variant in results.values():
+	for raw_result in results.values():
 		if raw_result is Dictionary:
 			var result: Dictionary = raw_result
 			if result.get("ok", false):
